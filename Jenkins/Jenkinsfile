@@ -1,0 +1,120 @@
+@Library('sdlc-library')_
+
+pipeline {
+    agent any
+
+    tools {
+        maven 'M363' // Maven 3.6.3
+        jdk 'JDK11'  // Java 11
+    }
+
+    parameters {
+        booleanParam(name: 'delete', defaultValue: false, description: 'Delete')
+    }
+
+
+    environment {
+
+        ENV= "${ENVIROMENT}".toUpperCase()
+        kubeEndpoint = utilsLibrary.getSysUatEndpoint(ENV)
+        kubeUser = utilsLibrary.getSysUatUser(ENV)
+        GITLAB_MAN_URL = 'https://github.com/iriscubereply/Pen-Test-Route.git'
+        GITLAB_CRED = 'utenza-tecnica'
+        NAMESPACE = "${ENVIROMENT}-istio-system"
+        NAMESPACE_GW_VS = "${ENVIROMENT}-security"
+        GITHUB_ISTIO = 'https://github.com/iriscubereply/CB-Sec-IstioConfig.git'
+        
+
+    }
+    
+    stages {
+    
+        stage('Git Clone') {
+            steps {
+                dir("manifest") {
+                    script {
+                        git url: "${GITLAB_MAN_URL}",
+                            credentialsId: "${GITLAB_CRED}"
+                    }
+                } 
+                dir("istio") {
+                    script {
+                        git url: "${GITHUB_ISTIO}",
+                        branch: "main",
+                            credentialsId: "${GITLAB_CRED}"
+                    }
+                }   
+                
+            }
+        }
+
+        stage('Deploy resources route') {
+            when {
+                expression {
+                    return !params.delete
+                }
+            }
+            steps {
+                script{
+                    dir('manifest') {
+                        sh "sed -i 's/<IP>/${WHITE_LIST_IP}/'  AKS/${ENV}/pt-route.yaml"
+                        sh "cat AKS/${ENV}/pt-route.yaml"
+                        utilsLibrary.deployResourceOc(kubeUser, kubeEndpoint, "AKS/${ENV}/pt-route.yaml")
+                    }
+                }
+            }
+        }
+        stage('Deploy resources gw e vs') {
+            when {
+                expression {
+                    return !params.delete
+                }
+            }
+            steps {
+                script{
+                    dir('istio') {
+                     
+                        sh "sed -i 's/<ENV>/${ENVIROMENT}/'  ./gw/frontend-ingress-gw.yaml"
+                        sh "sed -i 's/<ENV>/${ENVIROMENT}/'  ./vs/frontend-ingress-vs.yaml"
+                        sh "chmod +x -R ./script_pt.sh"
+                        sh "./script_pt.sh ${ENVIROMENT}"
+                        utilsLibrary.deployResourceOc(kubeUser, kubeEndpoint, "./gw/frontend-ingress-gw.yaml")
+                        utilsLibrary.deployResourceOc(kubeUser, kubeEndpoint, "./vs/frontend-ingress-vs.yaml")
+                    }
+                }
+            }
+        }
+
+        stage('Delete resources route,gw e vs') {
+            when {
+                expression {
+                    return params.delete
+                }
+            }
+            steps {
+                script{
+                    dir('manifest') {
+
+                        if(ENVIROMENT=='prod'){
+                           NAMESPACE='istio-system'
+                        }
+                        
+                        utilsLibrary.deleteReourceOc(kubeUser, kubeEndpoint, "route","pt-route-${ENVIROMENT}",NAMESPACE)
+                        utilsLibrary.deleteReourceOc(kubeUser, kubeEndpoint, "gw","${ENVIROMENT}-gw-for-pt",NAMESPACE_GW_VS)
+                        utilsLibrary.deleteReourceOc(kubeUser, kubeEndpoint, "vs","${ENVIROMENT}-vs-for-pt",NAMESPACE_GW_VS)
+                        
+
+                    } 
+                }
+            }
+        }
+    }
+    /*
+    post {
+        always {
+            deleteDir()
+        }
+    }
+    */
+    
+}

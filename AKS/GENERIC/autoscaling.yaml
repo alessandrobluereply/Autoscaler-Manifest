@@ -1,0 +1,13 @@
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: home-page-service
+  namespace: sys-orchestration
+spec:
+  maxReplicas: 4
+  minReplicas: 3
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: home-page-service
+  targetCPUUtilizationPercentage: 70
